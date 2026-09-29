@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ equipo_nombre }} - Monitor ACWR</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 500px; margin: 0 auto; padding: 15px; background-color: #f7fafc; color: #2d3748; }
+        a.back { display: inline-block; margin-bottom: 15px; color: #3182ce; text-decoration: none; font-weight: bold; }
+        .card { background: white; padding: 15px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 20px; }
+        input, select, button { width: 100%; padding: 10px; margin-top: 6px; border-radius: 8px; border: 1px solid #e2e8f0; font-size: 15px; box-sizing: border-box; }
+        button { background-color: #38a169; color: white; border: none; font-weight: bold; cursor: pointer; }
+        .jugador-row { display: flex; justify-content: space-between; align-items: center; padding: 12px; background: white; margin-bottom: 10px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .badge { padding: 4px 8px; border-radius: 6px; color: white; font-weight: bold; font-size: 12px; display: inline-block; margin-top: 4px; }
+        .rpe-input { width: 70px !important; text-align: center; }
+    </style>
+</head>
+<body>
+
+    <a href="/" class="back">← Volver a Equipos</a>
+    <h1>⚽ {{ equipo_nombre }}</h1>
+
+    <!-- Formulario para añadir jugador -->
+    <div class="card">
+        <h4>Añadir Jugador</h4>
+        <form action="/anadir-jugador/{{ equipo_id }}" method="POST" style="display: flex; gap: 10px;">
+            <input type="text" name="nombre" placeholder="Nombre del jugador" required style="margin-top:0;">
+            <button type="submit" style="width: auto; white-space: nowrap;">Añadir</button>
+        </form>
+    </div>
+
+    <!-- Formulario para registrar carga diaria -->
+    {% if jugadores %}
+    <form action="/registrar-carga/{{ equipo_id }}" method="POST">
+        <div class="card">
+            <h4>Registrar Sesión Diaria</h4>
+            <label>Fecha: <input type="date" name="fecha" id="fechaField"></label>
+            <label style="margin-top: 10px; display: block;">Duración (Minutos): 
+                <input type="number" name="minutos" placeholder="Ej: 75" required>
+            </label>
+        </div>
+
+        <h4>Plantilla & Ratio ACWR</h4>
+        {% for j in jugadores %}
+            <div class="jugador-row">
+                <div>
+                    <strong>{{ j.nombre }}</strong><br>
+                    <small>Aguda: {{ j.aguda }} | Crónica: {{ j.cronica }}</small><br>
+                    <span class="badge" style="background-color: {{ j.color }};">{{ j.estado }} ({{ j.acwr }})</span>
+                </div>
+                <div>
+                    <input type="number" name="rpe_{{ j.id }}" placeholder="RPE 1-10" min="1" max="10" step="0.5" class="rpe-input">
+                </div>
+            </div>
+        {% endfor %}
+
+        <button type="submit" style="margin-top: 15px; padding: 15px; font-size: 18px; background-color: #3182ce;">
+            💾 Guardar RPEs
+        </button>
+    </form>
+    {% endif %}
+
+    <script>
+        // Establece la fecha de hoy por defecto en el campo de fecha
+        document.getElementById('fechaField').valueAsDate = new Date();
+    </script>
+</body>
+</html>
