@@ -115,7 +115,7 @@ def ver_equipo(equipo_id):
     for j_id, j_nombre in jugadores_raw:
         aguda, cronica, acwr = calcular_acwr(j_id, fecha_sel)
         
-        # Buscar si ya hay un registro guardado para este jugador en la fecha seleccionada
+        # Cargar registro previo si ya existe para esa fecha
         cursor.execute('''
             SELECT minutos, rpe, carga_total FROM cargas 
             WHERE jugador_id = ? AND fecha = ?
@@ -179,7 +179,7 @@ def registrar_carga(equipo_id):
         rpe_str = request.form.get(f'rpe_{j_id}')
         min_str = request.form.get(f'min_{j_id}')
         
-        # Eliminar registro anterior si se está sobrescribiendo la fecha
+        # Elimina el registro anterior si se vuelve a guardar para el mismo día
         cursor.execute('DELETE FROM cargas WHERE jugador_id = ? AND fecha = ?', (j_id, fecha))
         
         if rpe_str and min_str and float(rpe_str) > 0 and float(min_str) > 0:
