@@ -1,1 +1,15 @@
-
+{
+  "name": "Monitor ACWR & RPE",
+  "short_name": "ACWR App",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f7fafc",
+  "theme_color": "#3182ce",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/53/53283.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
