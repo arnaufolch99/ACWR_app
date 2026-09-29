@@ -1,6 +1,6 @@
 import sqlite3
 from datetime import datetime, timedelta
-from flask import Flask, render_template, request, redirect, url_for
+from flask import Flask, render_template, request, redirect, url_for, jsonify
 
 app = Flask(__name__)
 DB_NAME = "acwr_database.db"
@@ -54,14 +54,12 @@ def calcular_acwr(jugador_id, fecha_ref_str=None):
     hace_7d = fecha_ref - timedelta(days=6)
     hace_28d = fecha_ref - timedelta(days=27)
     
-    # Carga Aguda (7 días hasta la fecha de referencia)
     cursor.execute('''
         SELECT SUM(carga_total) FROM cargas 
         WHERE jugador_id = ? AND fecha >= ? AND fecha <= ?
     ''', (jugador_id, hace_7d, fecha_ref))
     carga_aguda = cursor.fetchone()[0] or 0.0
     
-    # Carga Crónica (28 días promedio semanal)
     cursor.execute('''
         SELECT SUM(carga_total) FROM cargas 
         WHERE jugador_id = ? AND fecha >= ? AND fecha <= ?
@@ -115,7 +113,6 @@ def ver_equipo(equipo_id):
     for j_id, j_nombre in jugadores_raw:
         aguda, cronica, acwr = calcular_acwr(j_id, fecha_sel)
         
-        # Cargar registro previo si ya existe para esa fecha
         cursor.execute('''
             SELECT minutos, rpe, carga_total FROM cargas 
             WHERE jugador_id = ? AND fecha = ?
@@ -179,7 +176,6 @@ def registrar_carga(equipo_id):
         rpe_str = request.form.get(f'rpe_{j_id}')
         min_str = request.form.get(f'min_{j_id}')
         
-        # Elimina el registro anterior si se vuelve a guardar para el mismo día
         cursor.execute('DELETE FROM cargas WHERE jugador_id = ? AND fecha = ?', (j_id, fecha))
         
         if rpe_str and min_str and float(rpe_str) > 0 and float(min_str) > 0:
@@ -194,6 +190,33 @@ def registrar_carga(equipo_id):
     conn.commit()
     conn.close()
     return redirect(url_for('ver_equipo', equipo_id=equipo_id, fecha=fecha))
+
+@app.route('/api/historial/<int:jugador_id>')
+def api_historial(jugador_id):
+    fecha_end = request.args.get('fecha') or datetime.now().strftime('%Y-%m-%d')
+    end_date = datetime.strptime(fecha_end, '%Y-%m-%d').date()
+    
+    labels = []
+    aguda_list = []
+    cronica_list = []
+    acwr_list = []
+    
+    for i in range(20, -1, -1):
+        curr_date = end_date - timedelta(days=i)
+        curr_str = curr_date.strftime('%Y-%m-%d')
+        labels.append(curr_date.strftime('%d/%m'))
+        
+        aguda, cronica, acwr = calcular_acwr(jugador_id, curr_str)
+        aguda_list.append(aguda)
+        cronica_list.append(cronica)
+        acwr_list.append(acwr)
+        
+    return jsonify({
+        'labels': labels,
+        'aguda': aguda_list,
+        'cronica': cronica_list,
+        'acwr': acwr_list
+    })
 
 if __name__ == '__main__':
     app.run(debug=True)
