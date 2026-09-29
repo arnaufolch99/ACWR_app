@@ -4,6 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Monitor ACWR - Control de Carga</title>
+    <link rel="manifest" href="/static/manifest.json">
+    <meta name="theme-color" content="#3182ce">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/53/53283.png">
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px; background-color: #f7fafc; color: #2d3748; }
         h1 { text-align: center; color: #1a202c; font-size: 24px; }
@@ -21,7 +26,7 @@
     <div class="card">
         <h3>Crear Nuevo Equipo</h3>
         <form action="/crear-equipo" method="POST">
-            <input type="text" name="nombre" placeholder="Ej: Juvenil A, Bad Jr..." required>
+            <input type="text" name="nombre" placeholder="Ej: Bad Jr, Senior A..." required>
             <button type="submit">Añadir Equipo</button>
         </form>
     </div>
