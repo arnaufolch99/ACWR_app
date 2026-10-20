@@ -1,6 +1,7 @@
 import sqlite3
 from datetime import datetime, timedelta
-from flask import Flask, render_template, request, redirect, url_for, jsonify
+from flask import Flask, render_template, request, redirect, url_for
+import json
 
 app = Flask(__name__)
 DB_NAME = "acwr_database.db"
@@ -33,6 +34,10 @@ def init_db():
             minutos INTEGER NOT NULL,
             rpe REAL NOT NULL,
             carga_total REAL NOT NULL,
+            accel_alta INTEGER DEFAULT 0,
+            accel_baja INTEGER DEFAULT 0,
+            decel_baja INTEGER DEFAULT 0,
+            decel_alta INTEGER DEFAULT 0,
             FOREIGN KEY (jugador_id) REFERENCES jugadores (id)
         )
     ''')
@@ -42,28 +47,24 @@ def init_db():
 
 init_db()
 
-def calcular_acwr(jugador_id, fecha_ref_str=None):
+def calcular_acwr(jugador_id):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     
-    if fecha_ref_str:
-        fecha_ref = datetime.strptime(fecha_ref_str, '%Y-%m-%d').date()
-    else:
-        fecha_ref = datetime.now().date()
-        
-    hace_7d = fecha_ref - timedelta(days=6)
-    hace_28d = fecha_ref - timedelta(days=27)
+    hoy = datetime.now().date()
+    hace_7d = hoy - timedelta(days=7)
+    hace_28d = hoy - timedelta(days=28)
     
     cursor.execute('''
         SELECT SUM(carga_total) FROM cargas 
-        WHERE jugador_id = ? AND fecha >= ? AND fecha <= ?
-    ''', (jugador_id, hace_7d, fecha_ref))
+        WHERE jugador_id = ? AND fecha >= ?
+    ''', (jugador_id, hace_7d))
     carga_aguda = cursor.fetchone()[0] or 0.0
     
     cursor.execute('''
         SELECT SUM(carga_total) FROM cargas 
-        WHERE jugador_id = ? AND fecha >= ? AND fecha <= ?
-    ''', (jugador_id, hace_28d, fecha_ref))
+        WHERE jugador_id = ? AND fecha >= ?
+    ''', (jugador_id, hace_28d))
     carga_28d_total = cursor.fetchone()[0] or 0.0
     carga_cronica = carga_28d_total / 4.0
     
@@ -97,8 +98,6 @@ def crear_equipo():
 
 @app.route('/equipo/<int:equipo_id>')
 def ver_equipo(equipo_id):
-    fecha_sel = request.args.get('fecha') or datetime.now().strftime('%Y-%m-%d')
-    
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     
@@ -111,17 +110,7 @@ def ver_equipo(equipo_id):
     
     jugadores = []
     for j_id, j_nombre in jugadores_raw:
-        aguda, cronica, acwr = calcular_acwr(j_id, fecha_sel)
-        
-        cursor.execute('''
-            SELECT minutos, rpe, carga_total FROM cargas 
-            WHERE jugador_id = ? AND fecha = ?
-        ''', (j_id, fecha_sel))
-        reg = cursor.fetchone()
-        
-        min_reg = reg[0] if reg else ""
-        rpe_reg = reg[1] if reg else ""
-        carga_dia = reg[2] if reg else 0.0
+        aguda, cronica, acwr = calcular_acwr(j_id)
         
         if acwr == 0:
             estado, color = "Sin datos", "#718096"
@@ -141,26 +130,22 @@ def ver_equipo(equipo_id):
             'cronica': cronica,
             'acwr': acwr,
             'estado': estado,
-            'color': color,
-            'minutos': min_reg,
-            'rpe': rpe_reg,
-            'carga_dia': carga_dia
+            'color': color
         })
         
     conn.close()
-    return render_template('equipo.html', equipo_nombre=equipo_nombre, equipo_id=equipo_id, jugadores=jugadores, fecha_sel=fecha_sel)
+    return render_template('equipo.html', equipo_nombre=equipo_nombre, equipo_id=equipo_id, jugadores=jugadores)
 
 @app.route('/anadir-jugador/<int:equipo_id>', methods=['POST'])
 def anadir_jugador(equipo_id):
     nombre = request.form.get('nombre')
-    fecha_sel = request.form.get('fecha_sel') or datetime.now().strftime('%Y-%m-%d')
     if nombre:
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
         cursor.execute('INSERT INTO jugadores (nombre, equipo_id) VALUES (?, ?)', (nombre, equipo_id))
         conn.commit()
         conn.close()
-    return redirect(url_for('ver_equipo', equipo_id=equipo_id, fecha=fecha_sel))
+    return redirect(url_for('ver_equipo', equipo_id=equipo_id))
 
 @app.route('/registrar-carga/<int:equipo_id>', methods=['POST'])
 def registrar_carga(equipo_id):
@@ -168,55 +153,52 @@ def registrar_carga(equipo_id):
     cursor = conn.cursor()
     
     fecha = request.form.get('fecha') or datetime.now().strftime('%Y-%m-%d')
+    minutos = float(request.form.get('minutos', 0))
     
     cursor.execute('SELECT id FROM jugadores WHERE equipo_id = ?', (equipo_id,))
     jugadores_ids = cursor.fetchall()
     
     for (j_id,) in jugadores_ids:
-        rpe_str = request.form.get(f'rpe_{j_id}')
-        min_str = request.form.get(f'min_{j_id}')
-        
-        cursor.execute('DELETE FROM cargas WHERE jugador_id = ? AND fecha = ?', (j_id, fecha))
-        
-        if rpe_str and min_str and float(rpe_str) > 0 and float(min_str) > 0:
-            rpe_val = float(rpe_str)
-            min_val = float(min_str)
-            carga_total = min_val * rpe_val
+        rpe = request.form.get(f'rpe_{j_id}')
+        if rpe and float(rpe) > 0:
+            rpe_val = float(rpe)
+            carga_total = minutos * rpe_val
+            
+            accel_alta = int(request.form.get(f'accel_alta_{j_id}', 0) or 0)
+            accel_baja = int(request.form.get(f'accel_baja_{j_id}', 0) or 0)
+            decel_baja = int(request.form.get(f'decel_baja_{j_id}', 0) or 0)
+            decel_alta = int(request.form.get(f'decel_alta_{j_id}', 0) or 0)
+
             cursor.execute('''
-                INSERT INTO cargas (jugador_id, fecha, minutos, rpe, carga_total)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (j_id, fecha, min_val, rpe_val, carga_total))
+                INSERT INTO cargas (jugador_id, fecha, minutos, rpe, carga_total, accel_alta, accel_baja, decel_baja, decel_alta)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (j_id, fecha, minutos, rpe_val, carga_total, accel_alta, accel_baja, decel_baja, decel_alta))
             
     conn.commit()
     conn.close()
-    return redirect(url_for('ver_equipo', equipo_id=equipo_id, fecha=fecha))
+    return redirect(url_for('ver_equipo', equipo_id=equipo_id))
 
-@app.route('/api/historial/<int:jugador_id>')
-def api_historial(jugador_id):
-    fecha_end = request.args.get('fecha') or datetime.now().strftime('%Y-%m-%d')
-    end_date = datetime.strptime(fecha_end, '%Y-%m-%d').date()
+@app.route('/jugador/<int:jugador_id>')
+def ver_jugador(jugador_id):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
     
-    labels = []
-    aguda_list = []
-    cronica_list = []
-    acwr_list = []
+    cursor.execute('SELECT nombre, equipo_id FROM jugadores WHERE id = ?', (jugador_id,))
+    jugador = cursor.fetchone()
     
-    for i in range(20, -1, -1):
-        curr_date = end_date - timedelta(days=i)
-        curr_str = curr_date.strftime('%Y-%m-%d')
-        labels.append(curr_date.strftime('%d/%m'))
-        
-        aguda, cronica, acwr = calcular_acwr(jugador_id, curr_str)
-        aguda_list.append(aguda)
-        cronica_list.append(cronica)
-        acwr_list.append(acwr)
-        
-    return jsonify({
-        'labels': labels,
-        'aguda': aguda_list,
-        'cronica': cronica_list,
-        'acwr': acwr_list
-    })
+    cursor.execute('''
+        SELECT SUM(accel_alta), SUM(accel_baja), SUM(decel_baja), SUM(decel_alta)
+        FROM cargas WHERE jugador_id = ?
+    ''', (jugador_id,))
+    datos_gps = cursor.fetchone()
+    conn.close()
+
+    datos_gps = [d if d is not None else 0 for d in datos_gps]
+
+    return render_template('jugador.html', 
+                           jugador_nombre=jugador[0], 
+                           equipo_id=jugador[1],
+                           datos_gps=json.dumps(datos_gps))
 
 if __name__ == '__main__':
     app.run(debug=True)
