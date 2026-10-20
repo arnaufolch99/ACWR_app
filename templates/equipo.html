@@ -1,176 +1,204 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ equipo_nombre }} - Monitor ACWR</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 650px; margin: 0 auto; padding: 15px; background-color: #f7fafc; color: #2d3748; }
-        a.back { display: inline-block; margin-bottom: 15px; color: #3182ce; text-decoration: none; font-weight: bold; }
-        .card { background: white; padding: 15px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 20px; }
-        input, select, button { padding: 10px; margin-top: 6px; border-radius: 8px; border: 1px solid #e2e8f0; font-size: 15px; box-sizing: border-box; }
-        button { background-color: #38a169; color: white; border: none; font-weight: bold; cursor: pointer; }
-        .jugador-card { background: white; padding: 15px; margin-bottom: 15px; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-        .jugador-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-        .badge { padding: 4px 8px; border-radius: 6px; color: white; font-weight: bold; font-size: 12px; display: inline-block; }
-        .inputs-row { display: flex; gap: 10px; margin-top: 10px; }
-        .inputs-row div { flex: 1; }
-        .inputs-row label { font-size: 12px; color: #718096; display: block; font-weight: bold; }
-        .inputs-row input { width: 100%; text-align: center; }
-        .toggle-chart-btn { background-color: #edf2f7; color: #2b6cb0; border: 1px solid #cbd5e0; margin-top: 10px; font-size: 13px; padding: 6px 12px; border-radius: 6px; width: auto; font-weight: bold; }
-        .chart-container { display: none; margin-top: 15px; background: #faf5ff; padding: 10px; border-radius: 8px; border: 1px solid #e9d8fd; }
-    </style>
-</head>
-<body>
+import sqlite3
+from datetime import datetime, timedelta
+from flask import Flask, render_template, request, redirect, url_for
+import json
 
-    <a href="/" class="back">← Volver a Equipos</a>
-    <h1>⚽ {{ equipo_nombre }}</h1>
+app = Flask(__name__)
+DB_NAME = "acwr_database.db"
 
-    <!-- Añadir Jugador -->
-    <div class="card">
-        <h4>Añadir Jugador</h4>
-        <form action="/anadir-jugador/{{ equipo_id }}" method="POST" style="display: flex; gap: 10px;">
-            <input type="hidden" name="fecha_sel" value="{{ fecha_sel }}">
-            <input type="text" name="nombre" placeholder="Nombre del jugador" required style="flex:1; margin-top:0;">
-            <button type="submit" style="white-space: nowrap;">Añadir</button>
-        </form>
-    </div>
+def init_db():
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS equipos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nombre TEXT NOT NULL
+        )
+    ''')
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS jugadores (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nombre TEXT NOT NULL,
+            equipo_id INTEGER,
+            FOREIGN KEY (equipo_id) REFERENCES equipos (id)
+        )
+    ''')
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS cargas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            jugador_id INTEGER,
+            fecha DATE NOT NULL,
+            minutos INTEGER NOT NULL,
+            rpe REAL NOT NULL,
+            carga_total REAL NOT NULL,
+            accel_alta INTEGER DEFAULT 0,
+            accel_baja INTEGER DEFAULT 0,
+            decel_baja INTEGER DEFAULT 0,
+            decel_alta INTEGER DEFAULT 0,
+            FOREIGN KEY (jugador_id) REFERENCES jugadores (id)
+        )
+    ''')
+    
+    conn.commit()
+    conn.close()
 
-    <!-- Selector de Fecha -->
-    <form action="/registrar-carga/{{ equipo_id }}" method="POST">
-        <div class="card" style="border-left: 5px solid #3182ce;">
-            <h4 style="margin-top:0;">📅 Fecha de la Sesión</h4>
-            <input type="date" name="fecha" id="fechaField" value="{{ fecha_sel }}" onchange="cambiarFecha(this.value)" style="width: 100%; font-size: 16px; font-weight: bold;">
-        </div>
+init_db()
 
-        {% if jugadores %}
-        <h4>Plantilla & Control Cargas / ACWR</h4>
-        {% for j in jugadores %}
-            <div class="jugador-card">
-                <div class="jugador-header">
-                    <strong>{{ j.nombre }}</strong>
-                    <span class="badge" style="background-color: {{ j.color }};">{{ j.estado }} ({{ j.acwr }})</span>
-                </div>
-                <small style="color: #718096;">
-                    Aguda (7d): <strong>{{ j.aguda }}</strong> | Crónica (28d): <strong>{{ j.cronica }}</strong>
-                </small>
+def calcular_acwr(jugador_id):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    
+    hoy = datetime.now().date()
+    hace_7d = hoy - timedelta(days=7)
+    hace_28d = hoy - timedelta(days=28)
+    
+    cursor.execute('''
+        SELECT SUM(carga_total) FROM cargas 
+        WHERE jugador_id = ? AND fecha >= ?
+    ''', (jugador_id, hace_7d))
+    carga_aguda = cursor.fetchone()[0] or 0.0
+    
+    cursor.execute('''
+        SELECT SUM(carga_total) FROM cargas 
+        WHERE jugador_id = ? AND fecha >= ?
+    ''', (jugador_id, hace_28d))
+    carga_28d_total = cursor.fetchone()[0] or 0.0
+    carga_cronica = carga_28d_total / 4.0
+    
+    if carga_cronica > 0:
+        acwr = round(carga_aguda / carga_cronica, 2)
+    else:
+        acwr = 0.0
+        
+    conn.close()
+    return round(carga_aguda, 1), round(carga_cronica, 1), acwr
 
-                <div class="inputs-row">
-                    <div>
-                        <label>Minutos</label>
-                        <input type="number" name="min_{{ j.id }}" value="{{ j.minutos }}" placeholder="Ej: 75" min="0">
-                    </div>
-                    <div>
-                        <label>RPE (1-10)</label>
-                        <input type="number" name="rpe_{{ j.id }}" value="{{ j.rpe }}" placeholder="1-10" min="1" max="10" step="0.5">
-                    </div>
-                    <div>
-                        <label>Carga Sesión</label>
-                        <input type="text" value="{{ j.carga_dia }}" readonly style="background-color: #edf2f7; font-weight: bold; color: #2b6cb0;">
-                    </div>
-                </div>
+@app.route('/')
+def index():
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute('SELECT * FROM equipos')
+    equipos = cursor.fetchall()
+    conn.close()
+    return render_template('index.html', equipos=equipos)
 
-                <button type="button" class="toggle-chart-btn" onclick="toggleGrafico('{{ j.id }}')">
-                    📈 Ver Evolución ACWR
-                </button>
+@app.route('/crear-equipo', methods=['POST'])
+def crear_equipo():
+    nombre = request.form.get('nombre')
+    if nombre:
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        cursor.execute('INSERT INTO equipos (nombre) VALUES (?)', (nombre,))
+        conn.commit()
+        conn.close()
+    return redirect(url_for('index'))
 
-                <div id="chart-wrapper-{{ j.id }}" class="chart-container">
-                    <canvas id="chart-{{ j.id }}"></canvas>
-                </div>
-            </div>
-        {% endfor %}
+@app.route('/equipo/<int:equipo_id>')
+def ver_equipo(equipo_id):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    
+    cursor.execute('SELECT nombre FROM equipos WHERE id = ?', (equipo_id,))
+    equipo_row = cursor.fetchone()
+    equipo_nombre = equipo_row[0] if equipo_row else "Equipo"
+    
+    cursor.execute('SELECT id, nombre FROM jugadores WHERE equipo_id = ?', (equipo_id,))
+    jugadores_raw = cursor.fetchall()
+    
+    jugadores = []
+    for j_id, j_nombre in jugadores_raw:
+        aguda, cronica, acwr = calcular_acwr(j_id)
+        
+        if acwr == 0:
+            estado, color = "Sin datos", "#718096"
+        elif acwr < 0.8:
+            estado, color = "Desentrenamiento", "#3182ce"
+        elif 0.8 <= acwr <= 1.3:
+            estado, color = "Sweet Spot", "#38a169"
+        elif 1.3 < acwr < 1.5:
+            estado, color = "Advertencia", "#dd6b20"
+        else:
+            estado, color = "Peligro (Spike)", "#e53e3e"
+            
+        jugadores.append({
+            'id': j_id,
+            'nombre': j_nombre,
+            'aguda': aguda,
+            'cronica': cronica,
+            'acwr': acwr,
+            'estado': estado,
+            'color': color
+        })
+        
+    conn.close()
+    return render_template('equipo.html', equipo_nombre=equipo_nombre, equipo_id=equipo_id, jugadores=jugadores)
 
-        <button type="submit" style="width: 100%; padding: 15px; font-size: 18px; background-color: #3182ce; margin-top: 10px;">
-            💾 Guardar Sesión del Día
-        </button>
-        {% endif %}
-    </form>
+@app.route('/anadir-jugador/<int:equipo_id>', methods=['POST'])
+def anadir_jugador(equipo_id):
+    nombre = request.form.get('nombre')
+    if nombre:
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        cursor.execute('INSERT INTO jugadores (nombre, equipo_id) VALUES (?, ?)', (nombre, equipo_id))
+        conn.commit()
+        conn.close()
+    return redirect(url_for('ver_equipo', equipo_id=equipo_id))
 
-    <script>
-        const chartInstances = {};
+@app.route('/registrar-carga/<int:equipo_id>', methods=['POST'])
+def registrar_carga(equipo_id):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    
+    fecha = request.form.get('fecha') or datetime.now().strftime('%Y-%m-%d')
+    minutos = float(request.form.get('minutos', 0))
+    
+    cursor.execute('SELECT id FROM jugadores WHERE equipo_id = ?', (equipo_id,))
+    jugadores_ids = cursor.fetchall()
+    
+    for (j_id,) in jugadores_ids:
+        rpe = request.form.get(f'rpe_{j_id}')
+        if rpe and float(rpe) > 0:
+            rpe_val = float(rpe)
+            carga_total = minutos * rpe_val
+            
+            accel_alta = int(request.form.get(f'accel_alta_{j_id}', 0) or 0)
+            accel_baja = int(request.form.get(f'accel_baja_{j_id}', 0) or 0)
+            decel_baja = int(request.form.get(f'decel_baja_{j_id}', 0) or 0)
+            decel_alta = int(request.form.get(f'decel_alta_{j_id}', 0) or 0)
 
-        function cambiarFecha(nuevaFecha) {
-            window.location.href = "/equipo/{{ equipo_id }}?fecha=" + nuevaFecha;
-        }
+            cursor.execute('''
+                INSERT INTO cargas (jugador_id, fecha, minutos, rpe, carga_total, accel_alta, accel_baja, decel_baja, decel_alta)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (j_id, fecha, minutos, rpe_val, carga_total, accel_alta, accel_baja, decel_baja, decel_alta))
+            
+    conn.commit()
+    conn.close()
+    return redirect(url_for('ver_equipo', equipo_id=equipo_id))
 
-        function toggleGrafico(jugadorId) {
-            const wrapper = document.getElementById('chart-wrapper-' + jugadorId);
-            if (wrapper.style.display === 'block') {
-                wrapper.style.display = 'none';
-            } else {
-                wrapper.style.display = 'block';
-                if (!chartInstances[jugadorId]) {
-                    cargarGrafico(jugadorId);
-                }
-            }
-        }
+@app.route('/jugador/<int:jugador_id>')
+def ver_jugador(jugador_id):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    
+    cursor.execute('SELECT nombre, equipo_id FROM jugadores WHERE id = ?', (jugador_id,))
+    jugador = cursor.fetchone()
+    
+    cursor.execute('''
+        SELECT SUM(accel_alta), SUM(accel_baja), SUM(decel_baja), SUM(decel_alta)
+        FROM cargas WHERE jugador_id = ?
+    ''', (jugador_id,))
+    datos_gps = cursor.fetchone()
+    conn.close()
 
-        function cargarGrafico(jugadorId) {
-            const fechaSel = document.getElementById('fechaField').value;
-            fetch('/api/historial/' + jugadorId + '?fecha=' + fechaSel)
-                .then(res => res.json())
-                .then(data => {
-                    const ctx = document.getElementById('chart-' + jugadorId).getContext('2d');
-                    
-                    chartInstances[jugadorId] = new Chart(ctx, {
-                        type: 'bar',
-                        data: {
-                            labels: data.labels,
-                            datasets: [
-                                {
-                                    label: 'ACWR (Ratio)',
-                                    data: data.acwr,
-                                    type: 'line',
-                                    yAxisID: 'yACWR',
-                                    borderColor: '#e53e3e',
-                                    backgroundColor: '#e53e3e',
-                                    pointRadius: 4,
-                                    pointHoverRadius: 6,
-                                    borderWidth: 2,
-                                    fill: false
-                                },
-                                {
-                                    label: 'Carga Aguda (7d)',
-                                    data: data.aguda,
-                                    yAxisID: 'yCarga',
-                                    backgroundColor: 'rgba(66, 153, 225, 0.65)',
-                                    borderColor: '#3182ce',
-                                    borderWidth: 1
-                                },
-                                {
-                                    label: 'Carga Crónica (28d)',
-                                    data: data.cronica,
-                                    yAxisID: 'yCarga',
-                                    backgroundColor: 'rgba(160, 174, 192, 0.4)',
-                                    borderColor: '#a0aec0',
-                                    borderWidth: 1
-                                }
-                            ]
-                        },
-                        options: {
-                            responsive: true,
-                            interaction: { mode: 'index', intersect: false },
-                            scales: {
-                                yCarga: {
-                                    type: 'linear',
-                                    position: 'left',
-                                    title: { display: true, text: 'Carga (UA)' },
-                                    grid: { drawOnChartArea: true }
-                                },
-                                yACWR: {
-                                    type: 'linear',
-                                    position: 'right',
-                                    min: 0,
-                                    max: 2.2,
-                                    title: { display: true, text: 'ACWR Ratio' },
-                                    grid: { drawOnChartArea: false }
-                                }
-                            }
-                        }
-                    });
-                });
-        }
-    </script>
-</body>
-</html>
+    datos_gps = [d if d is not None else 0 for d in datos_gps]
+
+    return render_template('jugador.html', 
+                           jugador_nombre=jugador[0], 
+                           equipo_id=jugador[1],
+                           datos_gps=json.dumps(datos_gps))
+
+if __name__ == '__main__':
+    app.run(debug=True)
