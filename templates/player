@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Perfil de {{ jugador_nombre }}</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .chart-box { width: 650px; margin: 30px auto; }
+        .btn-back { text-decoration: none; background: #2b6cb0; color: white; padding: 8px 14px; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <a href="{{ url_for('ver_equipo', equipo_id=equipo_id) }}" class="btn-back">← Volver al Equipo</a>
+    
+    <h1 style="text-align: center;">Perfil de Aceleraciones: {{ jugador_nombre }}</h1>
+
+    <div class="chart-box">
+        <canvas id="graficoAceleraciones"></canvas>
+    </div>
+
+    <script>
+        const datosGPS = JSON.parse('{{ datos_gps | safe }}');
+
+        const ctx = document.getElementById('graficoAceleraciones').getContext('2d');
+        new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: [
+                    'Acc > 3.0 m/s²', 
+                    'Acc < 3.0 m/s²', 
+                    'Dec > -3.0 m/s²', 
+                    'Dec < -3.0 m/s²'
+                ],
+                datasets: [{
+                    label: 'Número total de acciones',
+                    data: datosGPS,
+                    backgroundColor: [
+                        '#3182ce',
+                        '#63b3ed',
+                        '#f6ad55',
+                        '#e53e3e'
+                    ],
+                    borderColor: [
+                        '#2b6cb0',
+                        '#4299e1',
+                        '#dd6b20',
+                        '#c53030'
+                    ],
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        title: { display: true, text: 'Nº de acciones' }
+                    }
+                }
+            }
+        });
+    </script>
+</body>
+</html>
